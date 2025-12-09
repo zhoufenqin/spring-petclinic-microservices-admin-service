@@ -1,0 +1,101 @@
+name: AppCAT Java Application Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      appcat_version:
+        description: "AppCAT version to use"
+        required: true
+        default: "7.7.0.7"
+        type: string
+      analysis_targets:
+        description: "Analysis targets (comma-separated)"
+        required: true
+        default: "azure-aks,azure-container-apps,azure-appservice"
+        type: string
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  APPCAT_VERSION: ${{ github.event.inputs.appcat_version || '7.7.0.7' }}
+  ANALYSIS_TARGETS: ${{ github.event.inputs.analysis_targets || 'azure-aks,azure-container-apps,azure-appservice' }}
+
+jobs:
+  analyze-java-app:
+    name: Analyze Java Application with AppCAT
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download and Setup AppCAT
+        run: |
+          # Set version and architecture variables
+          version="${{ env.APPCAT_VERSION }}"
+          arch="arm64"
+          name="azure-migrate-appcat-for-java-cli-macos-arm64-$version"
+          tar_url="https://fenzhosa.blob.core.windows.net/diagnose-mcp-logs/azure-migrate-appcat-for-java-cli-macOS-arm64-7.7.0.7.tar.gz?sp=r&st=2025-12-09T03:11:55Z&se=2025-12-09T11:26:55Z&spr=https&sv=2024-11-04&sr=b&sig=4CfR4Jg0aVPoY0tabYaXaHuyFDH8gRKCmXAX2Q6FEp8%3D"
+
+          echo "============== Setting up AppCAT =============="
+
+          # Download AppCAT
+          echo "> Downloading AppCAT..."
+          curl -L -O -J $tar_url
+
+          # Extract AppCAT
+          echo "> Extracting AppCAT..."
+          tar -xzf $name.tar.gz
+
+          # Test AppCAT
+          echo "> Testing AppCAT..."
+          chmod +x $name/appcat
+          ./$name/appcat --help
+
+      - name: Run AppCAT Analysis on Current Repository
+        run: |
+          version="${{ env.APPCAT_VERSION }}"
+          arch="arm64"
+          name="azure-migrate-appcat-for-java-cli-macos-arm64-$version"
+
+          echo "============== Analyzing Current Repository =============="
+          echo "> Repository: ${{ github.repository }}"
+          echo "> Branch: ${{ github.ref_name }}"
+          echo "> Commit: ${{ github.sha }}"
+          echo "> Targets: ${{ env.ANALYSIS_TARGETS }}"
+
+          # Run AppCAT analysis on the current repository
+          ./$name/appcat analyze \
+            --input . \
+            --target ${{ env.ANALYSIS_TARGETS }} \
+            --output ./appcat-report \
+            --overwrite \
+            --code-snips-number 1 \
+            --disable-telemetry
+
+          echo "✅ Analysis completed successfully!"
+
+      - name: Upload AppCAT Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: appcat-analysis-report-${{ github.run_number }}
+          path: appcat-report
+          retention-days: 30
+
+      - name: Display Report Summary
+        if: always()
+        run: |
+          echo "============== AppCAT Analysis Summary =============="
+          echo "Report generated at: appcat-report"
+          echo "Download the artifact to view the full report."
+          if [ -f appcat-report/output.yaml ]; then
+            echo ""
+            echo "Preview of findings:"
+            head -n 50 appcat-report/output.yaml
+          fi
